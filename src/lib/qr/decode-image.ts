@@ -1,55 +1,47 @@
-import jsQR from 'jsqr';
-import { QRScanResult } from '@/types/qr';
+import { BrowserQRCodeReader } from '@zxing/browser';
+import type { DecodeResult } from '@/types/qr';
+
+export interface DecodeImageOptions {
+  maxFileSizeBytes?: number;
+}
+
+const DEFAULT_MAX_SIZE = 10 * 1024 * 1024; // 10MB limit
 
 /**
- * Reads an image File from disk/memory and decodes any embedded QR payload using 2D Canvas.
+ * Decodes QR code content from an uploaded image file using ZXing browser reader.
  */
-export async function decodeQRFromImageFile(file: File): Promise<QRScanResult> {
-  return new Promise((resolve, reject) => {
-    if (!file.type.startsWith('image/')) {
-      return reject(new Error('Selected file must be a valid image format (PNG, JPEG, WebP, SVG).'));
-    }
+export async function decodeQRFromImageFile(
+  file: File,
+  options: DecodeImageOptions = {}
+): Promise<DecodeResult> {
+  const maxSize = options.maxFileSizeBytes ?? DEFAULT_MAX_SIZE;
 
-    const reader = new FileReader();
+  if (file.size > maxSize) {
+    throw new Error(`File size exceeds limit of ${Math.round(maxSize / (1024 * 1024))}MB.`);
+  }
 
-    reader.onerror = () => reject(new Error('Failed to read image file from local storage.'));
-    reader.onload = () => {
-      const img = new Image();
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Selected file is not a valid image format.');
+  }
 
-      img.onerror = () => reject(new Error('Unable to parse image data. File may be corrupted.'));
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
+  const objectUrl = URL.createObjectURL(file);
 
-        if (!ctx) {
-          return reject(new Error('Could not initialize 2D Rendering Context for decoding.'));
-        }
+  try {
+    const codeReader = new BrowserQRCodeReader();
+    const result = await codeReader.decodeFromImageUrl(objectUrl);
 
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0, img.width, img.height);
-
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'dontInvert',
-        });
-
-        if (!code) {
-          return reject(
-            new Error('No readable QR code found. Ensure the image is clear and well-lit.')
-          );
-        }
-
-        resolve({
-          rawText: code.data,
-          format: 'QR_CODE',
-          scannedAt: new Date().toISOString(),
-        });
-      };
-
-      img.src = reader.result as string;
+    return {
+      text: result.getText(),
+      format: result.getBarcodeFormat()?.toString() ?? 'QR_CODE',
+      timestamp: Date.now(),
     };
-
-    reader.readAsDataURL(file);
-  });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'NotFoundException') {
+      throw new Error('No readable QR code found in this image.');
+    }
+    throw new Error('Could not read or process image file.');
+  } finally {
+    // Explicitly release blob memory allocations
+    URL.revokeObjectURL(objectUrl);
+  }
 }

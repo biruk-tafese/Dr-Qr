@@ -33,4 +33,7 @@ export interface DecodeResult {
   timestamp: number;
 }
 
+// Exported alias to fix TS2305 for existing components
+export type QRScanResult = DecodeResult;
+
 export type ScannerStatus = 'idle' | 'requesting' | 'scanning' | 'paused' | 'error' | 'unsupported';
